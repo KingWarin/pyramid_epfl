@@ -19,7 +19,7 @@ class PaginatedListLayout(PrettyListLayout):
             data.append({'id': i, "data": "test" + str(i)})
 
     """
-
+    new_style_compo = True
     show_pagination = True  #: Set to true to show the pagination bar.
     show_search = True  #: Set to true to enable the search field.
     search_placeholder = "Search..."  #: Placeholder text for the search input.
@@ -28,12 +28,15 @@ class PaginatedListLayout(PrettyListLayout):
 
     theme_path = ['pretty_list_layout/theme', '<paginated_list_layout/theme']
 
-    js_parts = PrettyListLayout.js_parts + ["paginated_list_layout/paginated_list_layout.js"]
+    js_parts = []
     js_name = PrettyListLayout.js_name + [(
                                               'solute.epfl.components:paginated_list_layout/static',
                                               'paginated_list_layout.js'
                                           )]
 
+    compo_js_params = ['row_offset', 'row_limit', 'row_count', 'row_data', 'show_pagination', 'show_search',
+                       'search_focus']
+    compo_js_name = 'PaginatedListLayout'
     #: Add the specific list type for the paginated list layout. see :attr:`ListLayout.list_type`
     list_type = PrettyListLayout.list_type + ['paginated']
 
