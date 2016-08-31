@@ -501,7 +501,7 @@ if (typeof JSON !== 'object') {
 
 	// Check Existence
 	if ( typeof History.Adapter !== 'undefined' ) {
-		throw new Error('History.js Adapter has already been loaded...');
+		console.log('History.js Adapter has already been loaded...');
 	}
 
 	// Add the Adapter
@@ -584,7 +584,7 @@ if (typeof JSON !== 'object') {
 
 	// Check Existence
 	if ( typeof History.initHtml4 !== 'undefined' ) {
-		throw new Error('History.js HTML4 Support has already been loaded...');
+		console.log('History.js HTML4 Support has already been loaded...');
 	}
 
 
@@ -1287,7 +1287,7 @@ if (typeof JSON !== 'object') {
 
 	// Check Existence
 	if ( typeof History.init !== 'undefined' ) {
-		throw new Error('History.js Core has already been loaded...');
+		console.log('History.js Core has already been loaded...');
 	}
 
 	// Initialise History
