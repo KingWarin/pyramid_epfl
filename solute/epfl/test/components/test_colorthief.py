@@ -1,6 +1,8 @@
 # * encoding: utf-8
 
 from __future__ import unicode_literals
+import base64
+import os
 from lxml import etree
 
 from solute.epfl import components
@@ -64,6 +66,29 @@ def test_change(page):
 
     assert compo.get_value() is not None, "Wrong value after handle change"
     assert compo.image_src == image_url, "wrong image_src after handle_change"
+
+    color_divs = compo_html.findall("div[@class='epfl-colorthief-color pull-left text-center']")
+    assert len(color_divs), "No or not all color divs got renderd"
+
+
+def test_change_with_p(page):
+    page.root_node = components.ColorThief()
+    page.handle_transaction()
+
+    compo = page.root_node
+    compo_html = etree.fromstring(compo.render())
+
+    assert compo.get_value() is None, "Wrong default value"
+    assert compo.image_src is None, "Wrong default image_src"
+
+    with open(os.path.join(os.path.dirname(__file__), "indexed.png")) as f:
+        src = "data:image/png;base64," + base64.b64encode(f.read())
+    compo.handle_change(value=None, image_src=src)
+
+    compo.render_cache = None
+    compo_html = etree.fromstring(compo.render())
+
+    assert compo.get_value() is not None, "Wrong value after handle change"
 
     color_divs = compo_html.findall("div[@class='epfl-colorthief-color pull-left text-center']")
     assert len(color_divs), "No or not all color divs got renderd"
