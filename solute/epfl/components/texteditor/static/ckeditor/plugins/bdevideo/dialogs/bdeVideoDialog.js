@@ -10,7 +10,7 @@ function createThumb(target, video) {
 
         var thumbLink = new CKEDITOR.dom.element('div');
         thumbLink.setAttribute('class', 'bde-video bde-video-thumb');
-        thumbLink.setAttribute('style', 'background-image:url(' + url + ');');
+        thumbLink.setAttribute('style', 'background: no-repeat center/80% url(' + url + ');');
 
         target.append(thumbLink);
         target.append(icon);
@@ -39,6 +39,7 @@ function getVideoData() {
     var urlClean = '';
     var id = '';
     var platform = '';
+    var startTime = false;
 
     if (url.indexOf('youtu.be') >= 0) {
         platform = 'youtube';
@@ -61,15 +62,29 @@ function getVideoData() {
         platform = 'vimeo';
         if (url.indexOf('</iframe>') >= 0) {
             var end = url.substring(url.lastIndexOf('vimeo.com/"') + 6, url.indexOf('>'));
-            id = end.substring(fin.lastIndexOf('/') + 1, end.indexOf('"', end.lastIndexOf('/') + 1));
+            id = end.substring(end.lastIndexOf('/') + 1, end.indexOf('"', end.lastIndexOf('/') + 1));
         } else {
             id = url.substring(url.lastIndexOf('/') + 1, url.length);
         }
     }
+    if (url.indexOf('#t=') !== -1) {
+        startTime = url.substring(url.indexOf('#t=') + 3);
+    } else if (url.indexOf('start=') !== -1) {
+        startTime = url.substring(url.indexOf('start=') + 6);
+    }
+    if (id.indexOf('#') !== -1) {
+        id = id.substring(0, id.indexOf('#'));
+    }
     if (platform === 'youtube') {
         urlClean = 'https://www.youtube.com/embed/' + id + '?autoplay=1';
+        if (startTime) {
+            urlClean += '&start=' + startTime;
+        }
     } else if (platform === 'vimeo') {
         urlClean = 'https://player.vimeo.com/video/' + id + '?autoplay=1';
+        if (startTime) {
+            urlClean += '#t=' + startTime;
+        }
     }
     return {'platform': platform, 'id': id, 'url': urlClean};
 };
@@ -102,6 +117,7 @@ CKEDITOR.dialog.add('bdeVideoDialog', function(editor) {
 
             createThumb(p, videoData);
             editor.insertElement(p);
+            this.destroy();
         }
     };
 });
