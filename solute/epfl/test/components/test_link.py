@@ -1,12 +1,13 @@
 import pytest
 from solute.epfl import components
 from solute.epfl.core.epflcomponentbase import ComponentContainerBase
-
 from link_asserts import assert_href_is, assert_with_a_twist, assert_breadcrumb, assert_list_element
+
 
 @pytest.fixture(params=[True, False])
 def bool_toggle(request):
     return request.param
+
 
 @pytest.fixture(params=[
     # event_name, route, url
@@ -31,9 +32,6 @@ def test_name_generation(page):
     )
     page.handle_transaction()
     compo = page.root_node
-
-    assert 'None' in compo.render(), 'text and name are not set, but "None" is missing in the rendered html.'
-    compo.render_cache = None
 
     compo.text = test_text
     assert test_text in compo.render(), 'text set to "{text}" but is missing in the rendered html.'.format(
@@ -231,7 +229,6 @@ def test_selection(page):
         ((0, 3), '<mark>foo</mark>bar'),
         ((2, 4), 'fo<mark>ob</mark>ar'),
         ((2, 10), 'fo<mark>obar</mark>'), ]:
-
         compo.selection = selection
         assert result in compo.render(), \
             'selection set around foobar, but mark tag is missing or malformed in html.'
@@ -277,13 +274,26 @@ def test_context_menu(page, bool_toggle):
         assert 'data-event="rename"' not in compo.render(), "Fnd context menu entry rename where no was expected"
 
 
-def test_popover_text(page):
+def test_btn_link_color(page):
     page.root_node = components.Link(
         text='foobar',
-        popover_text='component popover text'
+        btn_link=True,
+        btn_link_color="primary"
     )
     page.handle_transaction()
 
     compo = page.root_node
 
-    assert 'data-toggle="popover" data-content="component popover text" data-trigger="focus" data-placement="top"' in compo.render(), 'popover_text set but popover text is missing or malformed in html.'
+    assert 'btn btn-primary' in compo.render(), 'btn_link_color set but btn_link_color is missing or malformed in html.'
+
+def test_btn_disabled(page):
+    page.root_node = components.Link(
+        text='foobar',
+        btn_link=True,
+        btn_disabled=True
+    )
+    page.handle_transaction()
+
+    compo = page.root_node
+
+    assert 'btn btn-default disabled' in compo.render(), 'btn_disabled set but disabled is missing or malformed in html.'

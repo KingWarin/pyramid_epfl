@@ -1,44 +1,18 @@
 # coding: utf-8
-from pprint import pprint
-from collections2 import OrderedDict as odict
 from collections import MutableSequence, MutableMapping
-
-import types, copy, string, inspect
+import types
+import copy
+import inspect
 
 from pyramid import security
-
-from solute.epfl.core import epflclient, epflutil, epflacl, epflvalidators
-from solute.epfl import validators
-from solute.epfl.core.epflutil import Lifecycle, generate_dynamic_class_id, generate_cid
-
 import ujson as json
-
 import jinja2
 import jinja2.runtime
 from jinja2.exceptions import TemplateNotFound
 
-
-class CompoStateAttribute(object):
-    """Descriptor for component state attributes.
-    """
-
-    def __init__(self, initial_value=None, name='var'):
-        """Wrapper to provide just in time access to the compo state in the transaction,
-
-        :param initial_value: The initial value of this compo state attribute.
-        :param name: The name of this compo state attribute.
-        """
-        self.initial_value = initial_value
-        self.name = name
-        self.type = CompoStateAttribute
-
-    def __get__(self, obj, cls):
-        if obj:
-            return obj.get_state_attr(self.name, self.initial_value)
-        return self
-
-    def __set__(self, obj, value):
-        return obj.set_state_attr(self.name, value)
+from solute.epfl.core import epflutil, epflacl, epflvalidators
+from solute.epfl.core.epfldescriptor import Descriptor, Reference, CompoStateAttribute
+from solute.epfl.core.epflutil import Lifecycle, generate_dynamic_class_id, generate_cid
 
 
 class MissingContainerComponentException(Exception):
@@ -170,8 +144,6 @@ class UnboundComponent(object):
     instantiated component if it is called with an :class:`.UnboundComponent`.
     """
     __dynamic_class_store__ = None  #: Internal caching for :attr:`UnboundComponent.__dynamic_class__`
-    __global_dynamic_class_store__ = {}  #: Global caching for :attr:`UnboundComponent.__dynamic_class__`
-    __use_global_store__ = True  #: Flag whether to use the global dynamic class cache.
 
     def __init__(self, cls, config):
         """
@@ -181,9 +153,14 @@ class UnboundComponent(object):
         self.__unbound_cls__ = cls
         self.__unbound_config__ = config.copy()
 
-        # Copy config and create a cid if none exists.
+        # Create a cid if none exists.
+        if self.__unbound_config__.get('cid', None) is None:
+            self.__unbound_config__['cid'] = generate_cid()
+            self.__unbound_config__['__autogen_cid__'] = self.__unbound_config__['cid']
+
+        # Separate positional information from the config.
         self.position = (
-            self.__unbound_config__.pop('cid', None) or generate_cid(),
+            self.__unbound_config__.pop('cid', None),
             self.__unbound_config__.pop('slot', None)
         )
 
@@ -226,22 +203,11 @@ class UnboundComponent(object):
         stripped_conf.pop('cid', None)
         stripped_conf.pop('slot', None)
         if len(stripped_conf) > 0:
-            if self.__use_global_store__:
-                conf_hash = stripped_conf.__str__()
-                try:
-                    return self.__global_dynamic_class_store__[(conf_hash, self.__unbound_cls__)]
-                except KeyError:
-                    pass
-
             name = self.__unbound_cls__.__name__ + '_auto_' + generate_dynamic_class_id()
             self.__dynamic_class_store__ = type(name, (self.__unbound_cls__, ), self.__unbound_config__)
 
             setattr(self.__dynamic_class_store__, '___unbound_component__', self)
-            setattr(self.__dynamic_class_store__, '__epfl_do_not_track', not self.__use_global_store__)
-
-            if self.__use_global_store__:
-                self.__global_dynamic_class_store__[(conf_hash, self.__unbound_cls__)] = self.__dynamic_class_store__
-                return self.__global_dynamic_class_store__[(conf_hash, self.__unbound_cls__)]
+            setattr(self.__dynamic_class_store__, '__epfl_do_not_track', True)
 
             return self.__dynamic_class_store__
 
@@ -254,17 +220,12 @@ class UnboundComponent(object):
                       'ccid': container.cid,
                       'cid': self.position[0],
                       'slot': slot}
-        container.page.transaction.set_component(self.position[0], compo_info, position=position)
+        try:
+            container.page.transaction.set_component(self.position[0], compo_info, position=position)
+        except Exception:
+            if self.position[0] == self.__unbound_config__.get('__autogen_cid__'):
+                return self(cid=None).register_in_transaction(container, slot, position)
         return container.page.transaction.get_component_instance(container.page, self.position[0])
-
-    def create_by_compo_info(self, *args, **kwargs):
-        """
-        Expose the :func:`ComponentBase.create_by_compo_info` in order to allow storing UnboundComponent instances
-        instead of raw classes. This is required in order to have dynamic classes at all with a pickling session store,
-        since only static classes can be pickled. The class is setup with all dynamic attributes by
-        :func:`__dynamic_class__`.
-        """
-        return self.__dynamic_class__.create_by_compo_info(*args, **kwargs)
 
     def __getstate__(self):
         """
@@ -360,7 +321,7 @@ class ComponentBase(object):
     epfl_event_trace = None  #: Contains a list of CIDs an event bubbled through. Only available in handle\_ methods
 
     #: These are the compo_state-names for this ComponentBase-Class
-    base_compo_state = {'visible', 'name', 'value', 'mandatory', 'validation_error', 'validators'}
+    base_compo_state = {'visible', 'name', 'value', 'mandatory', 'validation_error', 'validators', 'strip_value'}
 
     is_template_element = True  #: Needed for template-reflection: this makes me a template-element (like a form-field)
 
@@ -379,7 +340,7 @@ class ComponentBase(object):
     disable_auto_update = False
 
     #: New style components use the new default mechanism to update client side javascript states automatically.
-    new_style_compo = False
+    compo_js_auto_parts = False
     compo_js_params = []  #: Attributes to be provided as JS parameters.
     compo_js_extras = []  #: New style features to be activated.
     compo_js_name = 'ComponentBase'  #: Name of the JS Class.
@@ -389,6 +350,7 @@ class ComponentBase(object):
 
     # Input Helper:
     value = None  #: The actual value of the input element that is posted upon form submission.
+    strip_value = False  #: strip value if true in get value
 
     validation_error = ''  #: Set during call of :func:`validate` with an error message if validation fails.
     validation_type = None  #: Form validation selector.
@@ -417,15 +379,6 @@ class ComponentBase(object):
 
         config.add_static_view(name="epfl/components/" + compo_path_part,
                                path="solute.epfl.components:" + compo_path_part + "/static")
-
-    @classmethod
-    def create_by_compo_info(cls, page, compo_info, container_id):
-        compo_obj = cls(page, compo_info['cid'], __instantiate__=True, config=compo_info["config"])
-        if container_id:
-            container_compo = page.components[container_id]  # container should exist before their content
-            compo_obj.set_container_compo(container_compo, compo_info["slot"])
-            container_compo.add_component_to_slot(compo_obj, compo_info["slot"])
-        return compo_obj
 
     def __new__(cls, *args, **config):
         """
@@ -467,8 +420,13 @@ class ComponentBase(object):
         hashable - as all mutable builtins are - a copy is generated in the compo state.
         """
         try:
-            return self.compo_info['compo_state'][key]
+            result = self.compo_info['compo_state'][key]
+            if isinstance(result, Descriptor):
+                return result.__get__(self, self.__class__)
+            return result
         except KeyError:
+            if isinstance(value, Descriptor):
+                return value.__get__(self, self.__class__)
             try:
                 hash(value)
             except TypeError:
@@ -478,7 +436,14 @@ class ComponentBase(object):
             return value
 
     def set_state_attr(self, key, value):
-        self.compo_info.setdefault('compo_state', {})[key] = value
+        if isinstance(self.compo_info.setdefault('compo_state', {}).get(key), Descriptor):
+            self.compo_info['compo_state'][key].__set__(self, value)
+        else:
+            self.compo_info.setdefault('compo_state', {})[key] = value
+
+    @property
+    def reflect(self):
+        return Reference()
 
     @property
     def request(self):
@@ -536,14 +501,6 @@ class ComponentBase(object):
     @container_compo.setter
     def container_compo(self, value):
         self.compo_info['ccid'] = value.cid
-
-    def register_in_transaction(self, container, slot=None, position=None):
-        compo_info = {'class': self.__unbound_component__.__getstate__(),
-                      'config': self.__config,
-                      'ccid': container.cid,
-                      'cid': self.cid,
-                      'slot': slot}
-        self.page.transaction.set_component(self.cid, compo_info, position=position, compo_obj=self)
 
     def get_component_info(self):
         info = {"class": self.__unbound_component__.__getstate__(),
@@ -732,7 +689,6 @@ class ComponentBase(object):
         identified by it´s "component_id" (self.cid).
         May be overridden by concrete components.
         """
-
         event_handler = getattr(self, "handle_" + event_name, None)
         epfl_event_trace = event_params.pop('epfl_event_trace', [])
         try:
@@ -859,7 +815,8 @@ class ComponentBase(object):
 
         for name in cls.combined_compo_state:
             original = getattr(cls, name, None)
-            if not isinstance(original, CompoStateAttribute) and not isinstance(original, types.MethodType):
+            if not isinstance(original, CompoStateAttribute) \
+                    and not isinstance(original, types.MethodType):
                 setattr(cls, name, CompoStateAttribute(original, name))
 
         if not cls.template_name:
@@ -867,6 +824,9 @@ class ComponentBase(object):
 
         if hasattr(cls, 'cid'):
             raise Exception("You illegally set a cid as a class attribute in " + repr(cls))
+
+        if hasattr(cls, 'new_style_compo'):
+            raise DeprecationWarning('new_style_compo is deprecated use compo_js_auto_parts, in: ' + repr(cls))
 
     def redraw(self, parts=None):
         """ This requests a redraw. All components that are requested to be redrawn are redrawn when
@@ -915,26 +875,26 @@ class ComponentBase(object):
         self.page.transaction.switch_component(cid, target, position=position)
 
     @classmethod
-    def check_new_style_js_parts(cls):
+    def check_compo_js_auto_parts(cls):
         if not cls.js_parts:
             return
 
         inherited_cls = cls.__bases__[0]
-        if inherited_cls.new_style_compo == cls.new_style_compo:
-            return inherited_cls.check_new_style_js_parts()
+        if inherited_cls.compo_js_auto_parts == cls.compo_js_auto_parts:
+            return inherited_cls.check_compo_js_auto_parts()
 
         if inherited_cls.js_parts is cls.js_parts:
             raise Exception(
                 'CompatibilityError: You have inherited a non empty js_parts attribute on a new style component %s. '
-                'Set your own new_style_compo compliant js_parts attribute or set new_style_compo to False.'
+                'Set your own compo_js_auto_parts compliant js_parts attribute or set compo_js_auto_parts to False.'
                 % cls
             )
 
     def get_compo_init_js(self):
-        if not self.new_style_compo:
+        if not self.compo_js_auto_parts:
             return ''
 
-        self.check_new_style_js_parts()
+        self.check_compo_js_auto_parts()
 
         params = {}
         for param_name in self.compo_js_params:
@@ -1080,8 +1040,13 @@ class ComponentBase(object):
 
     def get_value(self):
         """
-        Return the field value without conversions.
+        Return the field value
         """
+        if self.strip_value:
+            try:
+                return self.value.strip()
+            except AttributeError:
+                pass
         return self.value
 
     #########################
@@ -1328,7 +1293,7 @@ class ComponentContainerBase(ComponentBase):
         self.node_list = self.init_struct() or self.node_list  # if init_struct returns None, keep original value.
         for node in self.node_list:
             cid, slot = node.position
-            self.add_component(node(self.page, cid, __instantiate__=True),
+            self.add_component(node,
                                slot=slot,
                                cid=cid)
 
@@ -1352,10 +1317,7 @@ class ComponentContainerBase(ComponentBase):
             cid, slot = compo_obj.position
             compo_obj = compo_obj.register_in_transaction(self, slot, position=position)
         else:
-            # Generate UUID if no cid has been set previously.
-            if not cid:
-                cid = generate_cid()
-            compo_obj.register_in_transaction(self, slot, position=position)
+            raise DeprecationWarning("Directly adding a component that was instantiated is no longer supported.")
 
         # the transaction-setup has to be redone because the component can be displayed directly in this request.
         compo_obj.init_transaction()

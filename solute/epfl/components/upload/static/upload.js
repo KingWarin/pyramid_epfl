@@ -1,8 +1,8 @@
 epfl.Upload = function (cid, params) {
-    epfl.ComponentBase.call(this, cid, params);
+    epfl.FormInputBase.call(this, cid, params);
 };
 
-epfl.Upload.inherits_from(epfl.ComponentBase);
+epfl.Upload.inherits_from(epfl.FormInputBase);
 
 Object.defineProperty(epfl.Upload.prototype, 'remove_icon', {
     get: function () {
@@ -19,7 +19,8 @@ Object.defineProperty(epfl.Upload.prototype, 'dropzone', {
 epfl.Upload.prototype.is_async_uploading = false;
 
 epfl.Upload.prototype.after_response = function (data) {
-    epfl.ComponentBase.prototype.after_response.call(this, data);
+    epfl.FormInputBase.prototype.after_response.call(this, data);
+
     var obj = this;
     if (obj.params['show_file_upload_input']) {
         obj.elm.find("input").fileupload({
@@ -95,7 +96,7 @@ epfl.Upload.prototype.validate_files = function (data) {
             if (obj.params.allowed_file_types) {
                 var type_is_allowed = false;
                 for (var j = 0; j < obj.params.allowed_file_types.length; j++) {
-                    if (data[i].name.endsWith(obj.params.allowed_file_types[j])) {
+                    if (data[i].name.toLowerCase().endsWith(obj.params.allowed_file_types[j].toLowerCase())) {
                         type_is_allowed = true;
                     }
                 }
@@ -226,7 +227,7 @@ epfl.Upload.prototype.upload_files_sync = function (data) {
         }
         raw_files.push({data: data[i].reader_result, name: data[i].file_name});
     }
-    obj.change(raw_files)
+    obj.change(raw_files);
 };
 
 epfl.Upload.prototype.check_for_valid_files = function (data) {
@@ -300,12 +301,27 @@ epfl.Upload.prototype.extract_file_data = function (files, callback) {
                 img.src = this.result;
 
                 var imageLoaded = function (error) {
+
+                    var name = file.name;
+                    var type = file.type.split("/")[1];
+                    if (name === undefined) {
+                        // copied from
+                        // http://stackoverflow.com/questions/105034/create-guid-uuid-in-javascript
+                        // seems to be the correct way to generate uuid in javascript
+                        name = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                            var r = Math.random() * 16 | 0,
+                                v = c == 'x' ? r : (r & 0x3 | 0x8);
+                            return v.toString(16);
+                        });
+                        name += "." + type;
+                    }
+
                     file_data.push({
-                        name: file.name,
+                        name: name,
                         reader_result: that.result,
                         file_size: file.size,
-                        file_name: file.name,
-                        file_type: file.name.split('.').pop(),
+                        file_name: name,
+                        file_type: type,
                         file_is_img: !error,
                         file_img_width: error ? null : img.width,
                         file_img_height: error ? null : img.height,
@@ -326,7 +342,7 @@ epfl.Upload.prototype.extract_file_data = function (files, callback) {
                 img.onerror = function () {
                     imageLoaded(true);
                 };
-            }
+            };
         })(files[i]);
         reader.readAsDataURL(files[i]);
     }
@@ -366,7 +382,7 @@ epfl.Upload.prototype.handle_click = function (event) {
     if (this.is_async_uploading) {
         return;
     }
-    epfl.ComponentBase.prototype.handle_click.call(this, event);
+    epfl.FormInputBase.prototype.handle_click.call(this, event);
 
     if (this.remove_icon.is(event.target)) {
         this.send_event('remove_icon', {});
@@ -374,4 +390,3 @@ epfl.Upload.prototype.handle_click = function (event) {
         this.send_event('click', {});
     }
 };
-

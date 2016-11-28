@@ -16,6 +16,8 @@ from PIL import Image
 @contextmanager
 def get_palette(blob, color_count=10,compress_image=False):
     with Image.open(blob) as image:
+        if image.mode == "P":
+            image = image.convert("RGB")
         if compress_image:
             image.thumbnail(size=(200, 200))
         c_map = mmcq([pixel for pixel in image.getdata()], color_count)

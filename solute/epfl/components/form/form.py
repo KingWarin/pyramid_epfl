@@ -2,28 +2,38 @@ from solute.epfl.core import epflcomponentbase
 
 
 class Form(epflcomponentbase.ComponentContainerBase):
-    template_name = "form/form.html"
-    js_parts = epflcomponentbase.ComponentContainerBase.js_parts[:]
-    js_parts.append("form/form.js")
 
+    # core internals
+    template_name = "form/form.html"
     asset_spec = "solute.epfl.components:form/static"
     js_name = ["form.js"]
-
     compo_state = ["_registered_fields", "is_dirty"]
 
+    # js settings
+    compo_js_auto_parts = True
+    compo_js_name = 'Form'
+    compo_js_params = ['event_name']
+
+    # custom compo attributes
     _registered_fields = None  #: Private cache of the fields registered with this form.
+    is_dirty = False  #: Flag whether the form has had any change of value since initialisatio
+    event_name = 'submit'  #: Default name of the event handling method (without trailing "handle\_").
 
+    # internal compo attributes
     validate_hidden_fields = False  #: Flag to determine whether hidden fields will be validated. TODO: DEFECTIVE!
-    is_dirty = False  #: Flag whether the form has had any change of value since initialisation.
 
-    def __init__(self, page, cid, node_list=None, validate_hidden_fields=False, **extra_params):
+    def __init__(self, page, cid,
+                 node_list=None,
+                 validate_hidden_fields=None,
+                 event_name=None,
+                 **extra_params):
         """Generates a form container with some convenience handling for child components with name and value.
 
         :param node_list: List of child components.
         :param validate_hidden_fields: Flag to determine whether hidden fields will be validated.
+        :param event_name: Default name of the event handling method (without trailing "handle\_").
         """
-        super(Form, self).__init__(page, cid, node_list=node_list, validate_hidden_fields=validate_hidden_fields,
-                                   **extra_params)
+        pass
 
     def handle_submit(self):
         pass
@@ -37,8 +47,8 @@ class Form(epflcomponentbase.ComponentContainerBase):
     def register_field(self, field):
         """
         Make a field known to the parent form. Since any component can reside in a form, the child components
-        which register themselves as fields have to provide the methods reset() and validate() (see :class:`.FormInputBase`),
-        since these are called for all registered fields by the parent form.
+        which register themselves as fields have to provide the methods reset() and validate()
+        (see :class:`.FormInputBase`), since these are called for all registered fields by the parent form.
         """
         if self._registered_fields is None:
             self._registered_fields = set()

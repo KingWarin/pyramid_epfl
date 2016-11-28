@@ -1,15 +1,18 @@
 epfl.SimpleToggle = function (cid, params) {
-    epfl.ComponentBase.call(this, cid, params);
+    epfl.FormInputBase.call(this, cid, params);
 };
 
-epfl.SimpleToggle.inherits_from(epfl.ComponentBase);
+epfl.SimpleToggle.inherits_from(epfl.FormInputBase);
 
 epfl.SimpleToggle.prototype.handle_click = function (event) {
-    console.log(event);
-    epfl.ComponentBase.prototype.handle_click.call(this, event);
+    epfl.FormInputBase.prototype.handle_click.call(this, event);
 
     var target = $(event.target);
     var obj = this;
+
+    if(obj.params.readonly){
+        return;
+    }
 
     if (target.attr('id') == this.cid + "_button" || target.parent().attr('id') == this.cid + "_button") {
         event.stopImmediatePropagation();
@@ -31,6 +34,7 @@ epfl.SimpleToggle.prototype.handle_click = function (event) {
             toggleClass("fa-" + obj.params["enabled_icon"]).
             toggleClass("fa-" + obj.params["enabled_icon_size"]).
             toggleClass("text-" + obj.params["enabled_icon_color"]);
-        epfl.FormInputBase.on_change(obj, toggle_value, obj.cid, !obj.params["fire_change_immediately"]);
+
+        this.handle_change(event, toggle_value);
     }
 };

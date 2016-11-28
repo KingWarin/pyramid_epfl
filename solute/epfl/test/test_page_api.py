@@ -1,20 +1,30 @@
 # * encoding: utf-8
 
-import unittest
 import time
 import pytest
-
-from solute.epfl.core.epflpage import Page
-from solute.epfl.core.epflcomponentbase import ComponentBase
-from solute.epfl.core.epflcomponentbase import ComponentContainerBase
-from solute.epfl import components
-from solute.epfl import extract_static_assets_from_components
-
-from collections2.dicts import OrderedDict
 import inspect
 
-from page import PageWithJS, PageWithJSNoBundle, PageWithCSS, PageWithCSSNoBundle, PageWithCSSandJS, \
-    PageWithCSSandJSNoBundle
+from pyramid import testing
+
+from solute.epfl import extract_static_assets_from_components
+from solute.epfl.core.epflassets import ModelBase
+from solute.epfl.core.epflpage import Page
+from solute.epfl.core.epflpage import MissingEventTargetException
+from solute.epfl.core.epflcomponentbase import MissingEventHandlerException
+from solute.epfl.core.epflcomponentbase import ComponentBase
+from solute.epfl.core.epflcomponentbase import ComponentContainerBase
+
+# helper page objects
+from page import PageWithJS
+from page import PageWithJSNoBundle
+from page import PageWithCSS
+from page import PageWithCSSNoBundle
+from page import PageWithCSSandJS
+from page import PageWithCSSandJSNoBundle
+from page import PageWithEventHandler
+
+
+pytestmark = pytest.mark.page_api
 
 
 def test_basic_component_operations(pyramid_req):
@@ -371,38 +381,39 @@ def test_re_rendering_components(pyramid_req):
 def test_container_assign(pyramid_req):
     """Check if components are assigned to the proper containers.
     """
+    class MyPage(Page):
 
-    Page.root_node = ComponentContainerBase(
-        cid='root_node',
-        node_list=[
-            ComponentContainerBase(
-                cid='container_1',
-                node_list=[
-                    ComponentBase(cid='compo_1')
-                ]
-            ),
-            ComponentContainerBase(
-                cid='container_2',
-                node_list=[
-                    ComponentBase(cid='compo_2')
-                ]
-            ),
-            ComponentContainerBase(
-                cid='container_3',
-                node_list=[
-                    ComponentBase(cid='compo_3')
-                ]
-            ),
-            ComponentContainerBase(
-                cid='container_4',
-                node_list=[
-                    ComponentBase(cid='compo_4')
-                ]
-            ),
-        ]
-    )
+        root_node = ComponentContainerBase(
+            cid='root_node',
+            node_list=[
+                ComponentContainerBase(
+                    cid='container_1',
+                    node_list=[
+                        ComponentBase(cid='compo_1')
+                    ]
+                ),
+                ComponentContainerBase(
+                    cid='container_2',
+                    node_list=[
+                        ComponentBase(cid='compo_2')
+                    ]
+                ),
+                ComponentContainerBase(
+                    cid='container_3',
+                    node_list=[
+                        ComponentBase(cid='compo_3')
+                    ]
+                ),
+                ComponentContainerBase(
+                    cid='container_4',
+                    node_list=[
+                        ComponentBase(cid='compo_4')
+                    ]
+                ),
+            ]
+        )
 
-    page = Page(None, pyramid_req)
+    page = MyPage(None, pyramid_req)
 
     page.handle_transaction()
 
@@ -521,3 +532,355 @@ def test_css_js_combination():
     assert css_name[4] == PageWithCSSandJS.css_name
     assert css_name[5] != PageWithCSSandJSNoBundle.css_name
     assert css_name[5] + PageWithCSSandJSNoBundle.css_name_no_bundle == PageWithCSSandJSNoBundle.css_name
+
+
+def test_handle_ajax_events_page_events(pyramid_req):
+    """ Ajax events are given as json to the page_request object. Event Type ('t') for page events is 'pe'.
+    The event name 'e' is used to call the corrosponding handle function. Given event params 'p' are used. """
+
+    # Create a page with a registered root node
+    page = PageWithEventHandler(None, pyramid_req)
+    page.request.is_xhr = True
+    page.page_request.params = {"q": []}
+    page.root_node = ComponentContainerBase
+    page.handle_transaction()
+
+    # initial call - no events registered, so the counter is set to 0
+    assert page.counter == 0
+    page.handle_ajax_events()
+    assert page.counter == 0
+
+    # now add an valid event: this increases the counter
+    page.page_request.params = {"q": [{u'p': {}, u'e': u'increase_counter', u'id': 1, u't': u'pe'}]}
+    page.handle_ajax_events()
+    assert page.counter == 1
+    page.handle_ajax_events()
+    assert page.counter == 2
+
+    # next try to call an event, which has no handler
+    page.page_request.params = {"q": [{u'p': {}, u'e': u'foobar', u'id': 1, u't': u'pe'}]}
+    with pytest.raises(AttributeError) as excinfo:
+        page.handle_ajax_events()
+    assert "object has no attribute 'handle_foobar'" in str(excinfo.value)
+
+    # events can have params, too. check if they are used.
+    page.page_request.params = {"q": [{u'p': {u'counter': 666}, u'e': u'increase_counter', u'id': 1, u't': u'pe'}]}
+    page.handle_ajax_events()
+    assert page.counter == 666
+
+
+def test_handle_ajax_events_component_events(pyramid_req):
+    """ Ajax events are given as json to the page_request object. Event Type ('t') for component events is 'ce'.
+    The event name 'e' is used to call the corrosponding handle function. Given event params 'p' are used. The
+    component is identified by its id via cid. """
+    # define a component with handler method
+    class CounterComponent(ComponentBase):
+        counter = 0
+
+        def handle_increase_counter(self, counter=None):
+            if counter is None:
+                self.counter += 1
+            else:
+                self.counter = counter
+
+    page = PageWithEventHandler(None, pyramid_req)
+    page.request.is_xhr = True
+    page.page_request.params = {"q": []}
+    page.root_node = ComponentContainerBase(
+        node_list=[CounterComponent(cid='counter_compo')]
+    )
+    page.handle_transaction()
+
+    # initial call - no events registered, so the counter is set to 0
+    assert page.counter_compo.counter == 0
+    page.handle_ajax_events()
+    assert page.counter_compo.counter == 0
+
+    # now add an valid event: this increases the counter
+    page.page_request.params = {
+        "q": [{u'cid': 'counter_compo', u'p': {}, u'e': u'increase_counter', u'id': 1, u't': u'ce'}]
+    }
+    page.handle_ajax_events()
+    assert page.counter_compo.counter == 1
+    page.handle_ajax_events()
+    assert page.counter_compo.counter == 2
+
+    # next try to call an event, which has no handler,
+    # note: spot the different exception, in opposite to the page test above!
+    page.page_request.params = {
+        "q": [{u'cid': 'counter_compo', u'p': {}, u'e': u'foobar', u'id': 1, u't': u'ce'}]
+    }
+    with pytest.raises(MissingEventHandlerException) as excinfo:
+        page.handle_ajax_events()
+
+    # events can have params, too. check if they are used.
+    page.page_request.params = {
+        "q": [{u'cid': 'counter_compo', u'p': {u'counter': 666}, u'e': u'increase_counter', u'id': 1, u't': u'ce'}]
+    }
+    page.handle_ajax_events()
+    assert page.counter_compo.counter == 666
+
+    # make sure all event handlers did not modified the counter of the page, as the test above
+    assert page.counter == 0
+
+    # now try to handle an event to an unexisting compo
+    page.page_request.params = {
+        "q": [{u'cid': 'not_existing', u'p': {}, u'e': u'increase_counter', u'id': 1, u't': u'ce'}]
+    }
+    with pytest.raises(MissingEventTargetException) as excinfo:
+        page.handle_ajax_events()
+    assert "Target element with CID 'not_existing' for event" in str(excinfo.value)
+
+
+def test_handle_ajax_events_invalid_types(pyramid_req):
+    """ Event types are either 'pe' for page events or 'ce' for component events. 'upl' is deprecated and all
+    others are invalid. """
+
+    # Create a page with a registered root node
+    page = PageWithEventHandler(None, pyramid_req)
+    page.request.is_xhr = True
+    page.page_request.params = {"q": []}
+    page.root_node = ComponentContainerBase
+    page.handle_transaction()
+
+    # check the depraction warning for 'upl' events
+    page.page_request.params = {"q": [{u'cid': 'counter_compo', u'p': {}, u'e': u'foobar', u'id': 1, u't': u'upl'}]}
+    with pytest.raises(Exception) as excinfo:
+        page.handle_ajax_events()
+    assert "The event type 'upl' is deprecated." == str(excinfo.value)
+
+    # check the unknown event type exception
+    page.page_request.params = {"q": [{u'cid': 'counter_compo', u'p': {}, u'e': u'foobar', u'id': 1, u't': u'foobar'}]}
+    with pytest.raises(Exception) as excinfo:
+        page.handle_ajax_events()
+    assert str(excinfo.value).startswith('Unknown ajax-event:')
+
+
+def test_page_init_transaction_handling(pyramid_req, another_route):
+    """ each page has it's unique transaction. changing the page must lead to a different transaction. """
+
+    # first get the standard page object with the default "dummy route" used in all tests.
+    page = Page(None, pyramid_req)
+    page_tid = page.transaction.tid
+    page.transaction.store()
+
+    # then create another request, with the another_route
+    another_request = testing.DummyRequest()
+    another_request.content_type = ''
+    another_request.is_xhr = False
+    another_request.matched_route = another_route
+
+    # now use the transaction id of the first page object as id to this one
+    another_request.params = {'tid': page_tid}
+    another_page = Page(None, another_request)
+
+    # this sould lead to a new tid for the another_page
+    assert another_page.transaction.tid != page.transaction.tid
+
+    # but using the some tid for the same route/page will use the old tid.
+    pyramid_req.params = {'tid': page_tid}
+    page_reload = Page(None, pyramid_req)
+    assert page_reload.transaction.tid == page.transaction.tid
+
+
+def test_page_call_ajax(pyramid_req):
+    page = Page(None, pyramid_req)
+
+    # a page without _the_ root node will fail.
+    with pytest.raises(AttributeError) as excinfo:
+        page()
+    assert str(excinfo.value) == "'Page' object has no attribute 'root_node'"
+
+    # so add it:
+    page.root_node = ComponentContainerBase
+
+    # but a request with enabled xhr fails also until the "q" param is given
+    page.request.is_xhr = True
+    with pytest.raises(KeyError):
+        page()
+
+    # so set it:
+    page.page_request.params = {"q": []}
+    response = page()
+
+    # will result in text/javascript content type
+    assert response.content_type == 'text/javascript'
+
+
+def test_page_call_html(pyramid_req):
+    page = Page(None, pyramid_req)
+    page.root_node = ComponentContainerBase
+
+    response = page()
+
+    # we excpect a html page
+    assert response.content_type == 'text/html'
+
+    # with an element with the id root_node
+    assert '<div id="root_node"' in response.text
+
+    # and also as epflid
+    assert 'epflid="root_node"' in response.text
+
+
+def test_page_call_with_prevent_transaction_loss_html(pyramid_req):
+    # first create a default setup: a page with a root node and a valid transaction
+    page = Page(None, pyramid_req)
+    page.root_node = ComponentContainerBase
+    page.handle_transaction()
+
+    original_tid = page.transaction.tid
+    # thats what we want and how it should be
+    assert '__initialized_components__' in page.transaction
+    assert 'root_node' in page.transaction['__initialized_components__']
+
+    # a transaction can be lost (for example) by reaching the timeout setting of the transaction store
+    # we simulate this deleting the memory storage and the transaction cache via _data
+    page.request.registry.transaction_memory = {}
+    page.transaction._data = {}
+
+    # now there are no __initialized_components__ in it any more
+    assert '__initialized_components__' not in page.transaction
+
+    # calling the page will call prevent_transaction_loss which should add the __initialized_components__ again
+    page()
+
+    assert '__initialized_components__' in page.transaction
+    assert 'root_node' in page.transaction['__initialized_components__']
+
+    # also note: this is not a _new_ transaction object - the tid is the same as before
+    # but the data will be resetted to the initial state
+    assert original_tid == page.transaction.tid
+
+
+def test_page_call_with_prevent_transaction_loss_ajax(pyramid_req):
+    # first create a default setup: a page with a root node and a valid transaction
+    page = Page(None, pyramid_req)
+    page.root_node = ComponentContainerBase
+    page.handle_transaction()
+
+    # thats what we want and how it should be
+    assert '__initialized_components__' in page.transaction
+    assert 'root_node' in page.transaction['__initialized_components__']
+
+    # a transaction can be lost (for example) by reaching the timeout setting of the transaction store
+    # we simulate this deleting the memory storage and the transaction cache via _data
+    page.request.registry.transaction_memory = {}
+    page.transaction._data = {}
+
+    # now there are no __initialized_components__ in it any more
+    assert '__initialized_components__' not in page.transaction
+
+    # setting up a valid ajax request
+    page.request.is_xhr = True
+    page.page_request.params = {"q": []}
+
+    # now calling the page will force a location.reload() on the browser
+    result = page()
+    assert result.text == 'window.location.reload();'
+
+    # this will then reload the page which is tested in the test above and will yield to a new valid transaction
+
+
+def test_setup_model(page):
+    """ check if the models gets instantiated for the 3 kinds (see docstring of setup_model). """
+    class MyModel(ModelBase):
+        pass
+
+    # first kind: model is a type
+    page.model = MyModel
+    page.setup_model()
+
+    # the model is now an instance of MyModel
+    assert page.model != MyModel
+    assert isinstance(page.model, MyModel)
+
+    # second kind: model is a list of types
+    page.model = [MyModel]
+    page.setup_model()
+
+    assert isinstance(page.model, list)
+    assert len(page.model) == 1
+    assert isinstance(page.model[0], MyModel)
+
+    # notable: tuples are not supported
+    page.model = (MyModel,)
+    with pytest.raises(TypeError):
+        page.setup_model()
+
+    # third kind: model is a dict
+    page.model = {'foo': MyModel}
+    page.setup_model()
+
+    assert isinstance(page.model, dict)
+    assert 'foo' in page.model
+    assert isinstance(page.model['foo'], MyModel)
+
+
+@pytest.mark.parametrize(
+    'function_name, kwargs, snippet_in_response',
+    [
+        ('jump_extern',
+         {'target_url': 'http://www.billiger.de'},
+         'epfl.jump_extern(\'http://www.billiger.de\', \'_blank\')'),
+        ('jump_extern',
+         {'target_url': 'http://www.billiger.de', 'target': 'some_frame'},
+         'epfl.jump_extern(\'http://www.billiger.de\', \'some_frame\')'),
+        ('go_next',
+         {'route': None, 'target_url': 'http://www.billiger.de'},
+         'epfl.go_next(\'http://www.billiger.de\')'),
+        # failing
+        # ('go_next',
+        #  {'route': 'dummy_route', 'target_url': 'http://www.billiger.de'},
+        #  'epfl.go_next(\'/\')'),
+        ('jump',
+         {'route': 'dummy_route'},
+         'epfl.jump(\'/\', 0, "")'),
+        ('jump',
+         {'route': 'dummy_route', 'wait': 10},
+         'epfl.jump(\'/\', 10, "")'),
+        ('jump',
+         {'route': 'dummy_route', 'wait': 10, 'confirmation_msg': 'Sure?'},
+         'epfl.jump(\'/\', 10, "Sure?")'),
+        ('reload',
+         {},
+         'epfl.reload_page();'),
+        ('show_message',
+         {'msg': 'Foobar'},
+         'epfl.show_message({"msg":"Foobar","typ":null,"fading":false});'),
+        ('show_message',
+         {'msg': 'Foobar', 'typ': 'info'},
+         'epfl.show_message({"msg":"Foobar","typ":"info","fading":false});'),
+        ('show_message',
+         {'msg': 'Foobar', 'typ': 'error', 'fading': True},
+         'epfl.show_message({"msg":"Foobar","typ":"error","fading":true});'),
+        ('show_fading_message',
+         {'msg': 'FadingFoobar', 'typ': 'info'},
+         'epfl.show_message({"msg":"FadingFoobar","typ":"info","fading":true});'),
+        ('prevent_page_leave',
+         {},
+         'epfl.prevent_page_leave(true,null);'),
+        ('prevent_page_leave',
+         {'prevent_leave': False},
+         'epfl.prevent_page_leave(false,null);'),
+        ('prevent_page_leave',
+         {'message': 'Foobar'},
+         'epfl.prevent_page_leave(true,"Foobar");'),
+    ]
+)
+def test_js_helper_methods(pyramid_req, function_name, kwargs, snippet_in_response):
+    """ test the functions with their parameters which use add_js_response add result. """
+    page = Page(None, pyramid_req)
+    page.root_node = ComponentContainerBase
+    page.handle_transaction()
+
+    func = getattr(page, function_name)
+    func(**kwargs)
+    response = page()
+
+    assert snippet_in_response in response.text
+
+
+def test_add_js_response(pyramid_req):
+    # XXX: add test for the tuple parameter variant, if relevant
+    pass

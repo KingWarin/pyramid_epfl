@@ -4,7 +4,11 @@ from solute.epfl import components
 
 from component_asserts import AssertCoherence, AssertRendering, AssertStyle
 
-from solute.epfl.core.epflcomponentbase import ComponentBase, ComponentContainerBase, CompoStateAttribute
+from solute.epfl.core.epflcomponentbase import ComponentBase, ComponentContainerBase
+from solute.epfl.core.epfldescriptor import CompoStateAttribute
+
+
+pytestmark = pytest.mark.component_api
 
 
 @pytest.fixture(params=['static', 'dynamic'])
@@ -51,7 +55,11 @@ def container_type(request, page, component_container_type_class):
     # The child_cls to be used if one is required. If possible the components own default_child_cls is used for better
     # compatibility.
     child_cls = getattr(component_container_type_class, 'default_child_cls', None)
+
     if child_cls is None:
+        child_cls = ComponentBase
+    elif isinstance(child_cls, CompoStateAttribute):
+        ## XXX: why is recursive tree giving a CompoStateAttribute object as default_child_cls?
         child_cls = ComponentBase
 
     default_args = getattr(component_container_type_class, 'data_interface', {})
@@ -144,3 +152,21 @@ def test_container_type_style(component_container_type_class, result):
     AssertStyle(component_container_type_class, result)
 
 
+def test_cid_attribute_protection(page):
+    class CIDAsAttributeComponent(ComponentContainerBase):
+        cid = 'foobar'
+
+    page.root_node = CIDAsAttributeComponent
+
+    with pytest.raises(Exception):
+        page()
+
+
+def test_new_style_deprecation_protection(page):
+    class NewStyleAttributeComponent(ComponentContainerBase):
+        new_style_compo = True
+
+    page.root_node = NewStyleAttributeComponent
+
+    with pytest.raises(Exception):
+        page()
